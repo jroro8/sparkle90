@@ -10,7 +10,7 @@ export const COLORS = ['#FF3EA5', '#FF7A1A', '#FFD000', '#34E07A', '#19C8FF', '#
 
 export const DEFAULT_STATE = {
   app: 'sparkle-sprint',
-  settings: { name: '', start: START, end: END },
+  settings: { name: '', start: START, end: END, waterGoal: 128, bottles: [8, 12, 16, 20, 32] },
   habits: [
     H('h_free',    'Freewriting',                  '✍️', '#FF3EA5'),
     H('h_bridget', 'Bridget – 1 Hour/Contests',    '🏆', '#FF7A1A'),
@@ -26,8 +26,12 @@ export const DEFAULT_STATE = {
     H('h_spanish', 'Spanish – 15 minutes',         '🇪🇸', '#FF7A1A'),
     H('h_meds',    'Meds/Vitamins',                '💊', '#C04BFF'),
   ],
-  days: {}, // 'YYYY-MM-DD': { done: [habitId, ...] }
+  days: {}, // 'YYYY-MM-DD': { done: [habitId, ...], water: [{ oz, t: 'HH:MM' }, ...] }
 };
+
+// The habit that the water tab checks off automatically at the goal.
+export const WATER_HABIT = 'h_water';
+export const waterOz = (st, day) => ((st.days[day] || {}).water || []).reduce((sum, w) => sum + w.oz, 0);
 
 export const mergeState = (p = {}) => ({
   ...DEFAULT_STATE, ...p,

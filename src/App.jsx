@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_STATE, COLORS, mergeState, todayStr, addDays, daysBetween, clampDay, nice, parse, fmt,
-  activeHabits, dayStats, overallStats, habitStats, pctText,
+  activeHabits, dayStats, overallStats, habitStats, pctText, WATER_HABIT, waterOz,
 } from './data.js';
 import { useGameState } from './sync.js';
 
@@ -103,15 +103,28 @@ function Tracker({ state, setState, mode, sync, notice, clearNotice, setupMissin
   const say = (msg) => { clearTimeout(tt.current); setToast({ msg, id: Date.now() }); tt.current = setTimeout(() => setToast(null), 2200); };
   useEffect(() => { if (notice) { say('🔄 Synced from your other device'); clearNotice(); } }, [notice]); // eslint-disable-line
 
-  const toggle = (habitId) => {
-    if (day > today) return;
-    const before = dayStats(state, day);
-    const done = new Set((state.days[day] || {}).done || []);
-    done.has(habitId) ? done.delete(habitId) : done.add(habitId);
-    setState(s => ({ ...s, days: { ...s.days, [day]: { ...(s.days[day] || {}), done: [...done] } } }));
-    const after = before.done + (done.has(habitId) ? 1 : -1);
-    if (after === before.total && before.total > 0) { setConfetti(c => c + 1); say('🌈 PERFECT DAY! 🌈'); }
+  // Every change to a day goes through here so confetti and the water habit stay in sync.
+  const changeDay = (d, fn) => {
+    if (d > today) return;
+    const before = dayStats(state, d);
+    const cur = state.days[d] || {};
+    const next = fn({ done: [...(cur.done || [])], water: [...(cur.water || [])] });
+    // Water goal crossed? Check (or uncheck) the gallon habit to match.
+    const goal = state.settings.waterGoal;
+    const oldOz = (cur.water || []).reduce((s, w) => s + w.oz, 0);
+    const newOz = next.water.reduce((s, w) => s + w.oz, 0);
+    const hasWaterHabit = state.habits.some(h => h.id === WATER_HABIT && !h.end);
+    if (hasWaterHabit && oldOz < goal && newOz >= goal && !next.done.includes(WATER_HABIT)) next.done.push(WATER_HABIT);
+    if (hasWaterHabit && oldOz >= goal && newOz < goal) next.done = next.done.filter(id => id !== WATER_HABIT);
+    if (oldOz < goal && newOz >= goal) say('💧 GALLON COMPLETE! 💧');
+    setState(s => ({ ...s, days: { ...s.days, [d]: { ...(s.days[d] || {}), ...next } } }));
+    const after = dayStats({ ...state, days: { ...state.days, [d]: next } }, d);
+    if (after.total && after.done === after.total && before.done < before.total) { setConfetti(c => c + 1); say('🌈 PERFECT DAY! 🌈'); }
   };
+
+  const toggle = (habitId) => changeDay(day, (x) => ({
+    ...x, done: x.done.includes(habitId) ? x.done.filter(id => id !== habitId) : [...x.done, habitId],
+  }));
 
   const openDay = (d) => { setDay(d); setTab('today'); };
   const o = overallStats(state, today);
@@ -127,11 +140,12 @@ function Tracker({ state, setState, mode, sync, notice, clearNotice, setupMissin
       )}
       <main style={{ maxWidth: 640, margin: '0 auto', padding: '0 14px', position: 'relative', zIndex: 1 }}>
         {tab === 'today' && <TodayTab state={state} day={day} setDay={setDay} today={today} toggle={toggle} o={o} />}
+        {tab === 'water' && <WaterTab state={state} setState={setState} day={day} setDay={setDay} today={today} changeDay={changeDay} />}
         {tab === 'calendar' && <CalendarTab state={state} today={today} openDay={openDay} />}
         {tab === 'stats' && <StatsTab state={state} today={today} o={o} />}
         {tab === 'settings' && <SettingsTab state={state} setState={setState} mode={mode} sync={sync} forgetDevice={forgetDevice} saveNow={saveNow} say={say} today={today} />}
       </main>
-      <BottomNav tab={tab} setTab={(t) => { setTab(t); if (t === 'today') setDay(clampDay(today, state)); }} />
+      <BottomNav tab={tab} setTab={(t) => { setTab(t); if (t === 'today' || t === 'water') setDay(clampDay(today, state)); }} />
       {confetti > 0 && <Confetti key={confetti} />}
       {toast && (
         <div role="status" style={{ position: 'fixed', left: 0, right: 0, bottom: 96, display: 'flex', justifyContent: 'center', zIndex: 60, pointerEvents: 'none' }}>
@@ -163,14 +177,14 @@ function Header({ state, o, mode, sync }) {
 }
 
 function BottomNav({ tab, setTab }) {
-  const tabs = [['today', '✅', 'Today'], ['calendar', '📅', 'Calendar'], ['stats', '📊', 'Stats'], ['settings', '⚙️', 'Settings']];
+  const tabs = [['today', '✅', 'Today'], ['water', '💧', 'Water'], ['calendar', '📅', 'Calendar'], ['stats', '📊', 'Stats'], ['settings', '⚙️', 'Settings']];
   return (
     <nav style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 50, padding: '8px 10px calc(8px + env(safe-area-inset-bottom))', background: 'rgba(255,255,255,0.95)', boxShadow: '0 -4px 20px rgba(59,10,87,0.2)' }}>
-      <div style={{ maxWidth: 640, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+      <div style={{ maxWidth: 640, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
         {tabs.map(([id, icon, label]) => {
           const on = tab === id;
           return (
-            <button key={id} onClick={() => setTab(id)} aria-current={on ? 'page' : undefined} style={{ border: 'none', cursor: 'pointer', borderRadius: 16, padding: '6px 2px', background: on ? 'linear-gradient(135deg, #FF3EA5, #C04BFF)' : 'transparent', color: on ? '#fff' : 'var(--ink)', fontWeight: 800, fontSize: 13 }}>
+            <button key={id} onClick={() => setTab(id)} aria-current={on ? 'page' : undefined} style={{ border: 'none', cursor: 'pointer', borderRadius: 16, padding: '6px 2px', background: on ? 'linear-gradient(135deg, #FF3EA5, #C04BFF)' : 'transparent', color: on ? '#fff' : 'var(--ink)', fontWeight: 800, fontSize: 12 }}>
               <div style={{ fontSize: 20 }} aria-hidden="true">{icon}</div>{label}
             </button>
           );
@@ -263,6 +277,159 @@ function TodayTab({ state, day, setDay, today, toggle, o }) {
           <button onClick={() => setDay(today > end ? end : today)} style={pillBtn('#fff')}>Back to today</button>
         </div>
       )}
+    </div>
+  );
+}
+
+// =====================================================
+// WATER
+// =====================================================
+function Jug({ pct }) {
+  const p = Math.min(1, pct);
+  const top = 40, bottom = 190, level = bottom - (bottom - top) * p;
+  const body = 'M40 60 Q40 40 60 40 L70 40 L70 18 Q70 10 78 10 L112 10 Q120 10 120 18 L120 40 L140 40 Q160 40 160 60 L160 176 Q160 190 146 190 L54 190 Q40 190 40 176 Z';
+  return (
+    <svg viewBox="0 0 200 200" width="170" height="170" role="img" aria-label={`Water jug ${pctText(p)} full`} style={{ flexShrink: 0 }}>
+      <defs>
+        <clipPath id="jugClip"><path d={body} /></clipPath>
+        <linearGradient id="waterG" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#7BE7FF" /><stop offset="0.5" stopColor="#19C8FF" /><stop offset="1" stopColor="#7B61FF" />
+        </linearGradient>
+      </defs>
+      <path d={body} fill="#EAF9FF" />
+      <g clipPath="url(#jugClip)">
+        <g style={{ transform: `translateY(${level}px)`, transition: 'transform .7s cubic-bezier(.4,0,.2,1)' }}>
+          <path d="M-60 6 Q-35 -6 -10 6 T40 6 T90 6 T140 6 T190 6 T240 6 T290 6 V220 H-60 Z" fill="url(#waterG)">
+            <animateTransform attributeName="transform" type="translate" from="0 0" to="50 0" dur="2.4s" repeatCount="indefinite" />
+          </path>
+          <circle cx="80" cy="40" r="4" fill="#fff" opacity="0.6" /><circle cx="120" cy="70" r="3" fill="#fff" opacity="0.5" /><circle cx="95" cy="100" r="5" fill="#fff" opacity="0.4" />
+        </g>
+      </g>
+      <path d={body} fill="none" stroke="#fff" strokeWidth="6" strokeLinejoin="round" />
+      <path d="M52 70 Q52 58 62 56" fill="none" stroke="#fff" strokeWidth="5" strokeLinecap="round" opacity="0.8" />
+      {p >= 1 && <text x="100" y="130" textAnchor="middle" fontSize="40">🌈</text>}
+    </svg>
+  );
+}
+
+function WaterTab({ state, setState, day, setDay, today, changeDay }) {
+  const [custom, setCustom] = useState('');
+  const [editGoal, setEditGoal] = useState(false);
+  const { start, end, waterGoal: goal, bottles } = state.settings;
+  const log = (state.days[day] || {}).water || [];
+  const oz = waterOz(state, day);
+  const future = day > today;
+  const left = Math.max(0, goal - oz);
+
+  const add = (amount) => {
+    const n = Math.round(Number(amount));
+    if (!n || n <= 0 || n > 200 || future) return;
+    const now = new Date();
+    const t = day === today ? `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}` : '';
+    changeDay(day, (x) => ({ ...x, water: [...x.water, { oz: n, t }] }));
+  };
+  const removeAt = (i) => changeDay(day, (x) => ({ ...x, water: x.water.filter((_, j) => j !== i) }));
+  const time12 = (t) => { if (!t) return 'added later'; const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+
+  // Last 7 counted days, ending on the selected day
+  const week = [];
+  for (let i = 6; i >= 0; i--) { const d = addDays(day, -i); if (d >= start && d <= end && d <= today) week.push(d); }
+  const counted = daysBetween(start, today > end ? end : today).filter(d => d >= start);
+  const gallonDays = counted.filter(d => waterOz(state, d) >= goal).length;
+  const avg = counted.length ? Math.round(counted.reduce((s, d) => s + waterOz(state, d), 0) / counted.length) : 0;
+
+  return (
+    <div className="rise">
+      <div className="card" style={{ padding: 16, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <button aria-label="Previous day" disabled={day <= start} onClick={() => setDay(addDays(day, -1))} style={{ ...pillBtn(), opacity: day <= start ? 0.35 : 1, fontSize: 18, padding: '4px 14px' }}>‹</button>
+          <div style={{ flex: 1, textAlign: 'center' }}>
+            <div className="display" style={{ fontSize: 22 }}>{day === today ? "Today's water" : nice(day, { weekday: 'long' })}</div>
+            <div style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 700 }}>{nice(day, { month: 'long', day: 'numeric' })}</div>
+          </div>
+          <button aria-label="Next day" disabled={day >= end || day >= today} onClick={() => setDay(addDays(day, 1))} style={{ ...pillBtn(), opacity: day >= end || day >= today ? 0.35 : 1, fontSize: 18, padding: '4px 14px' }}>›</button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <Jug pct={oz / goal} />
+          <div style={{ textAlign: 'center' }}>
+            <div className="display" style={{ fontSize: 52, lineHeight: 1, color: '#0FA3D6' }}>{oz}<span style={{ fontSize: 22 }}> oz</span></div>
+            <div style={{ fontWeight: 800, color: 'var(--muted)' }}>of {goal} oz · {pctText(Math.min(1, oz / goal))}</div>
+            <div style={{ fontWeight: 800, marginTop: 6, fontSize: 17 }}>{left ? `${left} oz to go 💪` : 'Gallon done! 🎉'}</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 700 }}>{left ? `≈ ${Math.ceil(left / 16)} more 16-oz bottles` : ''}</div>
+          </div>
+        </div>
+      </div>
+
+      {future ? (
+        <div className="card" style={{ padding: 12, textAlign: 'center', fontWeight: 700, marginBottom: 14 }}>💧 Water logging opens {nice(start, { month: 'long', day: 'numeric' })}!</div>
+      ) : (
+        <div className="card" style={{ padding: 14, marginBottom: 14 }}>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>Tap to add a drink</div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${bottles.length}, 1fr)`, gap: 8 }}>
+            {bottles.map(b => (
+              <button key={b} onClick={() => add(b)} style={{ border: 'none', cursor: 'pointer', borderRadius: 16, padding: '10px 2px', color: '#fff', fontWeight: 800, background: 'linear-gradient(160deg, #19C8FF, #7B61FF)', boxShadow: '0 4px 0 rgba(59,10,87,0.25)' }}>
+                <div className="display" style={{ fontSize: 22, lineHeight: 1 }}>+{b}</div><div style={{ fontSize: 12 }}>oz</div>
+              </button>
+            ))}
+          </div>
+          <form onSubmit={e => { e.preventDefault(); add(custom); setCustom(''); }} style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <input type="number" inputMode="numeric" min="1" max="200" value={custom} onChange={e => setCustom(e.target.value)} placeholder="Other amount (oz)" aria-label="Other amount in ounces" style={{ ...inputS, flex: 1 }} />
+            <button type="submit" disabled={!custom} style={{ ...pillBtn('var(--ink)', '#fff'), opacity: custom ? 1 : 0.5 }}>Add</button>
+          </form>
+        </div>
+      )}
+
+      {log.length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 14 }}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Drinks logged</div>
+          {log.map((w, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderTop: i ? '1.5px dashed #E5C8FF' : 'none' }}>
+              <span aria-hidden="true">💧</span>
+              <span style={{ fontWeight: 800, flex: 1 }}>{w.oz} oz</span>
+              <span style={{ color: 'var(--muted)', fontSize: 14, fontWeight: 700 }}>{time12(w.t)}</span>
+              <button aria-label={`Remove ${w.oz} oz`} onClick={() => removeAt(i)} style={{ ...pillBtn('#FFE0EF', '#D1146E'), padding: '2px 10px' }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {week.length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 14 }}>
+          <div style={{ fontWeight: 800, marginBottom: 10 }}>Last {week.length === 1 ? 'day' : `${week.length} days`}</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 120 }}>
+            {week.map(d => {
+              const v = waterOz(state, d); const h = Math.min(1, v / goal);
+              return (
+                <button key={d} onClick={() => setDay(d)} aria-label={`${nice(d)}: ${v} oz`} style={{ flex: 1, height: '100%', border: 'none', background: 'none', padding: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 3 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)' }}>{v}</span>
+                  <div style={{ width: '100%', height: `${Math.max(4, h * 80)}px`, borderRadius: 8, background: h >= 1 ? 'linear-gradient(180deg, #FFD000, #FF3EA5)' : 'linear-gradient(180deg, #7BE7FF, #19C8FF)', outline: d === day ? '3px solid var(--ink)' : 'none' }} />
+                  <span style={{ fontSize: 11, fontWeight: 800 }}>{nice(d, { weekday: 'short' })}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 12, textAlign: 'center' }}>
+            <div><div className="display" style={{ fontSize: 24 }}>{gallonDays}</div><div style={{ fontSize: 12, fontWeight: 800, color: 'var(--muted)' }}>gallon days</div></div>
+            <div><div className="display" style={{ fontSize: 24 }}>{avg} oz</div><div style={{ fontSize: 12, fontWeight: 800, color: 'var(--muted)' }}>daily average</div></div>
+          </div>
+        </div>
+      )}
+
+      <div className="card" style={{ padding: 12, fontSize: 14, fontWeight: 700 }}>
+        {!editGoal ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ flex: 1 }}>🎯 Daily goal: {goal} oz. Reaching it checks off “1 Gallon Water” automatically.</span>
+            <button onClick={() => setEditGoal(true)} style={pillBtn()}>Change</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label style={{ flex: 1 }}>Goal (oz)
+              <input type="number" min="8" max="400" value={goal} onChange={e => setState(s => ({ ...s, settings: { ...s.settings, waterGoal: Math.max(8, parseInt(e.target.value) || 128) } }))} style={{ ...inputS, marginTop: 4 }} />
+            </label>
+            <button onClick={() => setEditGoal(false)} style={pillBtn('var(--ink)', '#fff')}>Done</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
