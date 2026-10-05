@@ -1,7 +1,7 @@
 // =====================================================
 // DATA + MATH for the Q4 habit tracker
 // =====================================================
-export const START = '2026-10-03'; // exactly 90 days through Dec 31
+export const START = '2026-10-05'; // restarted Oct 5 (88 days through Dec 31)
 export const END = '2026-12-31';
 
 const H = (id, name, emoji, color) => ({ id, name, emoji, color, start: START, end: null });
@@ -33,14 +33,14 @@ export const DEFAULT_STATE = {
 export const WATER_HABIT = 'h_water';
 export const waterOz = (st, day) => ((st.days[day] || {}).water || []).reduce((sum, w) => sum + w.oz, 0);
 
-// Saves made before the start moved from Oct 1 to Oct 3 get the new start date.
-const OLD_STARTS = ['2026-10-01'];
+// Older saves get the new default start date, unless the start was picked in Settings.
+const OLD_STARTS = ['2026-10-01', '2026-10-03'];
 export const mergeState = (p = {}) => ({
   ...DEFAULT_STATE, ...p,
   app: 'sparkle-sprint',
   settings: (() => {
     const st = { ...DEFAULT_STATE.settings, ...(p.settings || {}) };
-    if (OLD_STARTS.includes(st.start)) st.start = START;
+    if (!st.startPicked && OLD_STARTS.includes(st.start)) st.start = START;
     return st;
   })(),
   habits: Array.isArray(p.habits) ? p.habits : DEFAULT_STATE.habits,

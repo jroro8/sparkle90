@@ -551,11 +551,40 @@ function SettingsTab({ state, setState, mode, sync, forgetDevice, saveNow, say, 
           <label style={{ fontWeight: 800 }}>Your name (for the cheer at the top)
             <input value={state.settings.name} maxLength={24} onChange={e => setState(s => ({ ...s, settings: { ...s.settings, name: e.target.value } }))} style={{ ...inputS, marginTop: 6 }} />
           </label>
+          <hr style={{ border: 'none', borderTop: '2px dashed #E5C8FF', margin: '16px 0' }} />
+          <StartDate state={state} setState={setState} today={today} say={say} />
         </div>
       )}
       {section === 'backup' && <Backup state={state} setState={setState} say={say} />}
       {section === 'sync' && <SyncPanel mode={mode} sync={sync} forgetDevice={forgetDevice} saveNow={saveNow} />}
       {section === 'reset' && <Reset setState={setState} />}
+    </div>
+  );
+}
+
+function StartDate({ state, setState, today, say }) {
+  const { start, end } = state.settings;
+  const [pick, setPick] = useState(start);
+  const total = daysBetween(start, end).length;
+  const apply = (d) => {
+    if (!d || d > end) return;
+    setState(s => ({ ...s, settings: { ...s.settings, start: d, startPicked: true } }));
+    setPick(d);
+    say(`Sprint starts ${nice(d, { month: 'short', day: 'numeric' })} ✨`);
+  };
+  return (
+    <div>
+      <div style={{ fontWeight: 800 }}>Sprint start date</div>
+      <div style={{ fontSize: 14, color: 'var(--muted)', margin: '2px 0 8px' }}>
+        Currently {nice(start, { month: 'long', day: 'numeric' })} → {nice(end, { month: 'long', day: 'numeric' })} ({total} days). Changing it doesn't delete any check-ins; days before the start just stop counting.
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <input type="date" aria-label="Start date" value={pick} min="2026-01-01" max={end} onChange={e => setPick(e.target.value)} style={{ ...inputS, flex: 1, minWidth: 150 }} />
+        <button onClick={() => apply(pick)} disabled={pick === start} style={{ ...pillBtn('var(--ink)', '#fff'), opacity: pick === start ? 0.5 : 1 }}>Save</button>
+      </div>
+      {today !== start && today <= end && (
+        <button onClick={() => apply(today)} style={{ ...pillBtn('#FFE0EF', '#D1146E'), marginTop: 10 }}>🔄 Fresh start from today</button>
+      )}
     </div>
   );
 }
